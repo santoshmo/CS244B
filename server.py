@@ -8,6 +8,12 @@ from scenarios import *
 import random
 import uuid
 
+IS_DEBUG = False
+
+def debug(str):
+	if IS_DEBUG:
+		print(str)
+
 class PrimaryCacheServer: 
 	def __init__(self, scaling_strategy: str, maximum_capacity = 1000, num_machines=10, cache_size=100, replication_factor=2, num_hashes_per_node=5, hash_func=hash): 
 		self.cache_size = cache_size
@@ -16,6 +22,7 @@ class PrimaryCacheServer:
 		self.scaling_strategy = scaling_strategy
 		self.machines = []
 		self.machine_hashes = []
+		self.machine_id_to_indices = defaultdict(list)
 		self.object_hashes = []
 		self.object_hash_to_key = {}
 		self.replication_factor = replication_factor
@@ -31,7 +38,7 @@ class PrimaryCacheServer:
 		if self.cache_size % num_machines != 0: 
 			raise ValueError('cache_size %s does not evenly divide by requested number of machines %s', str(self.cache_size), str(num_machines))
 		await asyncio.gather(*[self.add_node(scaling_strategy) for _ in range(num_machines)])
-		print("Done init machines")
+		debug("Done init machines")
 
 	async def add_node(self, scaling_strategy):
 		cost = 0
@@ -51,17 +58,18 @@ class PrimaryCacheServer:
 					raise Exception(f"collision occurred. Adding new machine hash {new_machine_hash} index {new_machine_index} to machine hashes {self.machine_hashes} failed")
 				self.machine_hashes.insert(new_machine_index, new_machine_hash)
 				self.machines.insert(new_machine_index, new_machine)
-				print(f"Added node {new_machine_hash} to index {new_machine_index}")
-				print(f"Updated machine hashes: {self.machine_hashes}")
+				self.machine_id_to_indices[new_machine.id].append(new_machine_index)
+				debug(f"Added node {new_machine_hash} to index {new_machine_index}")
+				debug(f"Updated machine hashes: {self.machine_hashes}")
 				cost += await self.migrate_data(new_machine_index)
 				success = True
 			except Exception as e:
-				print(f"Exception: {e.__class__} {e}")
+				debug(f"Exception: {e.__class__} {e}")
 			counter += 1
 
 		if not success:
 			raise Exception("Adding a new node failed")
-		print(f"Done adding machine {new_machine.id}")
+		debug(f"Done adding machine {new_machine.id}")
 		return cost
 
 	def remove_node(self, node_index=-1):
@@ -69,10 +77,12 @@ class PrimaryCacheServer:
 			node_index = random.randrange(0, len(self.machines))
 		if node_index >= len(self.machines):
 			raise Exception(f"Can't remove machine {node_index} from {len(self.machines)} machines.")
-		self.machine_hashes.pop(node_index)
-		self.machines.pop(node_index)
-		print(f"Removed node {node_index}")
-		print(f"Updated machine hashes: {self.machine_hashes}")
+		machine_id = self.machines[node_index].id
+		for node_index in self.machine_id_to_indices[machine_id]:
+			self.machine_hashes.pop(node_index)
+			self.machines.pop(node_index)
+			debug(f"Removed node {node_index}")
+		debug(f"Updated machine hashes: {self.machine_hashes}")
 
 	async def scaleCache(self, scaling_strategy: str): 
 		cost = 0 
@@ -94,7 +104,7 @@ class PrimaryCacheServer:
 		object_index_end = bisect_right(self.object_hashes, dest_machine_hash)
 		source_machine = self.machines[source_machine_index]
 		dest_machine = self.machines[dest_machine_index]
-		print(f"Migrating data between {left_machine_hash} and {dest_machine_hash} from source machine index {source_machine_index} to dest machine index {dest_machine_index}")
+		debug(f"Migrating data between {left_machine_hash} and {dest_machine_hash} from source machine index {source_machine_index} to dest machine index {dest_machine_index}")
 		if(left_machine_hash > dest_machine_hash):
 			cost += await self.move_objects(object_index_start, len(self.object_hashes), dest_machine, source_machine)
 			cost += await self.move_objects(0, object_index_end, dest_machine, source_machine)
@@ -107,12 +117,14 @@ class PrimaryCacheServer:
 		for object_index in range(object_index_start, object_index_end):
 			object_hash_to_migrate = self.object_hashes[object_index]
 			object_key_to_migrate = self.object_hash_to_key[object_hash_to_migrate]
-			print(f"Moving object {object_hash_to_migrate} index {object_index} key {object_key_to_migrate}")
-			print("Getting from source machine")
+			debug(f"Moving object {object_hash_to_migrate} index {object_index} key {object_key_to_migrate}")
+			debug(f"Getting from source machine {source_machine.id}")
 			object_to_migrate, op_cost = source_machine.get(object_key_to_migrate)
 			cost += op_cost 
 
-			cost += await dest_machine.insert(object_to_migrate)
+			debug(f"Inserting to dest machine {dest_machine.id}")
+			insertion_cost, _ = await dest_machine.insert(object_to_migrate)
+			cost += insertion_cost
 			source_machine.pop(object_key_to_migrate)
 			cost += op_costs.move_object_cost(object_to_migrate.size)
 		return cost
@@ -126,8 +138,8 @@ class PrimaryCacheServer:
 		for object_index in range(0, len(self.object_hashes)):
 			object_hash_to_migrate = self.object_hashes[object_index]
 			object_key_to_migrate = self.object_hash_to_key[object_hash_to_migrate]
-			print(f"Moving object {object_hash_to_migrate} index {object_index} key {object_key_to_migrate}")
-			print("Source machine:")
+			debug(f"Moving object {object_hash_to_migrate} index {object_index} key {object_key_to_migrate}")
+			debug("Source machine:")
 			object_to_migrate, op_cost = source_machine.get(object_key_to_migrate)
 			cost += op_cost 
 
@@ -160,17 +172,19 @@ class PrimaryCacheServer:
 		cost += hash_cost
 		machine_index = (bisect_right(self.machine_hashes, new_object_hash)) % len(self.machines)
 
-		print(f"Attempting to insert new object {new_object_hash} to machine index {machine_index}")
+		debug(f"Attempting to insert new object {new_object_hash} to machine index {machine_index}")
 		try: 
-			cost += await self.machines[machine_index].insert(req.object)
-			self.object_hash_to_key[new_object_hash] = req.object.name
-			object_index = bisect_right(self.object_hashes, new_object_hash)
-			self.object_hashes.insert(object_index, new_object_hash)
-			print(f"Added new object {new_object_hash} to index {object_index}")
-			print(f"Updated object hashes: {self.object_hashes}")
+			insertion_cost, is_new_key = await self.machines[machine_index].insert(req.object)
+			cost += insertion_cost
+			if is_new_key:
+				self.object_hash_to_key[new_object_hash] = req.object.name
+				object_index = bisect_right(self.object_hashes, new_object_hash)
+				self.object_hashes.insert(object_index, new_object_hash)
+				debug(f"Added new object {new_object_hash} to index {object_index}")
+				debug(f"Updated object hashes: {self.object_hashes}")
 			# self.replicate_datum(req.object, machine_index, REPLICATION_FACTOR) # TODO: What do we do for replication?
 		except MemoryError as e: 
-			print(f"Scaling from {len(self.machines)} machines")
+			debug(f"Scaling from {len(self.machines)} machines")
 			cost += await self.scaleCache(self.scaling_strategy)
 			cost += await self.insertObject(req, counter)
 
@@ -199,13 +213,13 @@ class PrimaryCacheServer:
 				machine_index, hash_cost = self.getMachineIndex(req.obj_name + '_' + str(counter))
 				cost += hash_cost
 
-				print(f"Getting {req.obj_name} from machine index {machine_index}")
+				debug(f"Getting {req.obj_name} from machine index {machine_index} id {self.machines[machine_index].id}")
 				cachedObject, get_cost = self.machines[machine_index].get(req.obj_name)
 				cost += get_cost
 				return cachedObject, cost
 			except Exception as e:
-				print(f"Exception: {e.__class__} {e}")
-				print(f"Getting {req.obj_name + '_' + str(counter)} from machine index {machine_index} failed")
+				debug(f"Exception: {e.__class__} {e}")
+				debug(f"Getting {req.obj_name + '_' + str(counter)} from machine index {machine_index} failed")
 				counter += 1
 		raise Exception(f"Getting {req.obj_name} used up max attempts of {self.replication_factor}")
 
@@ -219,20 +233,20 @@ class WorkerCacheServer:
 		self.num_requests_processing = 0
 		self.load_threshold = load_threshold
 
-	async def insert(self, obj: ObjectToCache): 
-		cost = 0
-
-		if self.memory - obj.size < 0: 
-			print("Memory error")
-			raise MemoryError('Machine not large enough')
-
-		else: 
-			cost += op_costs.write_cost()
+	async def insert(self, obj: ObjectToCache):
+		is_new_key = obj.name not in self.objects
+		if is_new_key:
+			if self.memory - obj.size < 0: 
+				debug("Memory error")
+				debug(self.memory)
+				self.dump()
+				raise MemoryError('Machine not large enough')
 			self.memory -= obj.size
-			obj_name = obj.name
-			self.objects[obj_name] = obj
+		obj_name = obj.name
+		self.objects[obj_name] = obj
+		self.dump()
 
-		return cost 
+		return op_costs.write_cost(), is_new_key
 
 	def get(self, obj_name): 
 		cost = 0
@@ -246,16 +260,20 @@ class WorkerCacheServer:
 	def pop(self, obj_name):
 		#TODO: Do we need to add a cost to remove an object, or is that negligible? 
 		del self.objects[obj_name]
+		debug(f"===========POP============= {obj_name} from {self.id}")
 		self.dump()
 
 	def dump(self):
-		print(", ".join(self.objects.keys()))
+		debug(", ".join(self.objects.keys()))
 
 async def main():
 	pcs = PrimaryCacheServer('replication_factor', 10000, 5, 10, 2, 2)
 	await pcs.initMachines()
 	scenario_cost = await BasicWriteAndRead(0, pcs)
-	print(scenario_cost)
+	print(f"basic write and read: {scenario_cost}")
+
+	scenario_cost = await BasicWriteAndReadWithNodeFailures(0, pcs)
+	print(f"basic write and read with node failures: {scenario_cost}")
 
 if __name__ == '__main__':
 	asyncio.run(main())
