@@ -1,28 +1,10 @@
 from bisect import bisect_right
-from datetime import datetime
-import uuid
-import pdb
 from collections import defaultdict
 import op_costs 
-from scenarios import * 
-
-class ObjectToCache:
-	def __init__(self, name, size):
-		self.size = size
-		self.name = name
-		self.id = uuid.uuid4()
-
-class CacheInsertRequest: 
-	def __init__(self, obj: ObjectToCache): 
-		self.object = obj
-		self.timestamp = datetime.now()
-
-class CacheGetRequest:
-	def __init__(self, obj_name): 
-		self.obj_name = obj_name
+from utils import *
 
 class PrimaryCacheServer: 
-	def __init__(self, scaling_strategy: str, maximum_capacity = 1000, num_machines=5, cache_size=100): 
+	def __init__(self, scaling_strategy: str, maximum_capacity = 1000, num_machines=10, cache_size=100, replication_factor=2, hash_func=hash): 
 		self.cache_size = cache_size
 		self.maximum_capacity = maximum_capacity
 		self.machine_memory_size = self.cache_size // num_machines
@@ -31,9 +13,13 @@ class PrimaryCacheServer:
 		self.machine_hashes = []
 		self.object_hashes = []
 		self.object_hash_to_key = {}
-		self.initMachines(0, scaling_strategy, num_machines)
-
-	def initMachines(self, cost: int, scaling_strategy: str, num_machines):
+		# Map from object name to set of machines responsible
+		self.object_hash_to_machine_hash = {}
+		self.replication_factor = replication_factor
+		self.hash_func = hash_func
+		self.initMachines(scaling_strategy, num_machines)
+		
+	def initMachines(self, scaling_strategy: str, num_machines):
 		if self.cache_size % num_machines != 0: 
 			raise ValueError('cache_size %s does not evenly divide by requested number of machines %s', str(self.cache_size), str(num_machines))
 		for _ in range(num_machines):
@@ -55,6 +41,7 @@ class PrimaryCacheServer:
 		print(f"Added node {new_machine_hash} to index {new_machine_index}")
 		print(f"Updated machine hashes: {self.machine_hashes}")
 		cost += self.migrate_data(new_machine_index)
+
 		return cost
 
 	def scaleCache(self, scaling_strategy: str): 
@@ -62,7 +49,7 @@ class PrimaryCacheServer:
 		if scaling_strategy == 'horizontal':
 			# Add machine
 			# TODO(santoshm): Create a function out of this. Try to make it more general than just to horizontal scaling? 
-			if pcs.cache_size + pcs.machine_memory_size > pcs.maximum_capacity: 
+			if self.cache_size + self.machine_memory_size > self.maximum_capacity: 
 				raise MemoryError('Cache cannot scale any further. Please allocate more capacity.')
 			cost = self.add_node(scaling_strategy)
 			self.cache_size += self.machine_memory_size
@@ -96,26 +83,34 @@ class PrimaryCacheServer:
 			object_to_migrate, op_cost = source_machine.get(object_key_to_migrate)
 			cost += op_cost 
 
+			# Redistribute hashes
+			self.object_hash_to_machines[object_hash_to_migrate].remove(self.getHash(source_machine.id))
+			self.object_hash_to_machines[object_hash_to_migrate].add(self.getHash(dest_machine.id))
+
 			cost += dest_machine.insert(object_to_migrate)
 			source_machine.pop(object_key_to_migrate)
 			cost += op_costs.move_object_cost(object_to_migrate.size)
 		return cost 
 
-	def getHash(self, input):
-		return hash(input) % self.maximum_capacity, op_costs.compute_hash_cost()
+	def getHash(self, obj):
+		return self.hash_func(obj) % self.maximum_capacity, op_costs.compute_hash_cost()
 
-	# Consistent Hashing used to find the relevant machine for the requested object
-	# TODO(santoshm): Implement load-aware consistent hashing. 
-	# TODO(santoshm): Utilize some notion of the hotness of an object
+	# Consistent Hashing used to find the relevant machine for the requested object. This will get the first
+	# valid machine.
 	def getMachineIndex(self, obj_name: str):
 		object_hash, hash_cost = self.getHash(obj_name)
 		return (bisect_right(self.machine_hashes, object_hash)) % len(self.machines), hash_cost
 
-	def Insert(self, req: CacheInsertRequest):
-		cost = 0 
 
-		new_object_hash, hash_cost = self.getHash(req.object.name)
-		cost += hash_cost
+	def insertObject(self, req: CacheInsertRequest, used_hashes=set()): 
+		cost = 0
+		new_object_hash = None
+		counter = 0
+		while new_object_hash not in used_hashes:
+			new_object_hash, hash_cost = self.getHash(req.object.name + '_' + str(counter))
+			cost += hash_cost
+			used_hashes.add(new_object_hash)
+			counter += 1
 
 		machine_index = (bisect_right(self.machine_hashes, new_object_hash)) % len(self.machines)
 		print(f"Attempting to insert new object {new_object_hash} to machine index {machine_index}")
@@ -130,6 +125,23 @@ class PrimaryCacheServer:
 			print(f"Scaling from {len(self.machines)} machines")
 			cost += self.scaleCache(self.scaling_strategy)
 			cost += self.Insert(req)
+
+		return cost
+
+	def Insert(self, req: CacheInsertRequest):
+		cost = 0 
+
+		if self.scaling_strategy == 'replication_factor': 
+			if self.replication_factor == '': 
+				return ValueError('No replication factor provided')
+			# Generate replication factor (RF) number of hashes for the machines and objects
+			if object_hash_to_key not in self.object_hash_to_machine_hash:
+				self.object_hash_to_machine_hash[object_hash_to_key] = set()
+			used_hashes = self.object_hash_to_machine_hash[object_hash_to_key]
+			for i in range(self.replication_factor):
+				cost += self.insertObject(req, used_hashes)
+		else: 
+			cost += self.insertObject(req)
 
 		return cost 
 
@@ -146,24 +158,27 @@ class PrimaryCacheServer:
 		return cachedObject, cost
 
 class WorkerCacheServer: 
-	def __init__(self, scaling_strategy='horizontal', memory=100):
+	def __init__(self, scaling_strategy='horizontal', memory=100, load_threshold=2):
 		self.id = uuid.uuid4()
 		self.memory = memory 
 		self.scaling_strategy = scaling_strategy
 		self.objects = {}
 		self.hitCounter = defaultdict(int)
+		self.num_requests_processing = 0
 
 	def insert(self, obj: ObjectToCache): 
 		cost = 0
-		if self.memory - obj.size < 0: 
-			if self.scaling_strategy == 'horizontal': # TODO(santoshm): Make this an Enum
+
+		if self.scaling_strategy == 'horizontal': 
+			if self.memory - obj.size < 0: 
 				print("Memory error")
 				raise MemoryError('Machine not large enough')
-		else: 
-			cost += op_costs.write_cost()
-			self.memory -= obj.size
-			obj_name = obj.name
-			self.objects[obj_name] = obj
+
+			else: 
+				cost += op_costs.write_cost()
+				self.memory -= obj.size
+				obj_name = obj.name
+				self.objects[obj_name] = obj
 
 		return cost 
 
@@ -185,5 +200,4 @@ class WorkerCacheServer:
 		print(", ".join(self.objects.keys()))
 
 if __name__ == '__main__': 
-	pcs = PrimaryCacheServer('horizontal', 1000, 1, 1)
-	print(BasicWriteAndRead(0, pcs))
+	pcs = PrimaryCacheServer('horizontal', 1000, 1, 1, 2)

@@ -1,4 +1,4 @@
-from server import CacheInsertRequest, CacheGetRequest, ObjectToCache
+from utils import *
 
 def BasicWriteAndRead(scenario_cost, pcs): 
 	print("Adding first object")

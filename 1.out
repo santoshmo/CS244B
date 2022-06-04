@@ -1,0 +1,165 @@
+Added node 117 to index 0
+Updated machine hashes: [117]
+Migrating data between 117 and 117 from source machine index 0 to dest machine index 0
+Adding first object
+Attempting to insert new object 211 to machine index 0
+Added new object 211 to index 0
+Updated object hashes: [211]
+Adding second object
+Attempting to insert new object 530 to machine index 0
+Memory error
+Scaling from 1 machines
+Added node 425 to index 1
+Updated machine hashes: [117, 425]
+Migrating data between 117 and 425 from source machine index 0 to dest machine index 1
+Moving object 211 index 0 key first object
+Source machine:
+first object
+
+Attempting to insert new object 530 to machine index 0
+Memory error
+Scaling from 2 machines
+Added node 305 to index 1
+Updated machine hashes: [117, 305, 425]
+Migrating data between 117 and 305 from source machine index 2 to dest machine index 1
+Moving object 211 index 0 key first object
+Source machine:
+first object
+
+Attempting to insert new object 530 to machine index 0
+Memory error
+Scaling from 3 machines
+Added node 324 to index 2
+Updated machine hashes: [117, 305, 324, 425]
+Migrating data between 305 and 324 from source machine index 3 to dest machine index 2
+Attempting to insert new object 530 to machine index 0
+Memory error
+Scaling from 4 machines
+Added node 264 to index 1
+Updated machine hashes: [117, 264, 305, 324, 425]
+Migrating data between 117 and 264 from source machine index 2 to dest machine index 1
+Moving object 211 index 0 key first object
+Source machine:
+first object
+
+Attempting to insert new object 530 to machine index 0
+Memory error
+Scaling from 5 machines
+Added node 453 to index 5
+Updated machine hashes: [117, 264, 305, 324, 425, 453]
+Migrating data between 425 and 453 from source machine index 0 to dest machine index 5
+Attempting to insert new object 530 to machine index 0
+Memory error
+Scaling from 6 machines
+Added node 83 to index 0
+Updated machine hashes: [83, 117, 264, 305, 324, 425, 453]
+Migrating data between 453 and 83 from source machine index 1 to dest machine index 0
+Attempting to insert new object 530 to machine index 0
+Added new object 530 to index 1
+Updated object hashes: [211, 530]
+Getting first object
+Getting first object from machine index 0
+second object
+Added node 936 to index 0
+Updated machine hashes: [936]
+Migrating data between 936 and 936 from source machine index 0 to dest machine index 0
+Adding first object
+Attempting to insert new object 55 to machine index 0
+Added new object 55 to index 0
+Updated object hashes: [55]
+Adding second object
+Attempting to insert new object 393 to machine index 0
+Memory error
+Scaling from 1 machines
+Added node 443 to index 0
+Updated machine hashes: [443, 936]
+Migrating data between 936 and 443 from source machine index 1 to dest machine index 0
+Moving object 55 index 0 key first object
+Source machine:
+first object
+
+Attempting to insert new object 393 to machine index 0
+Memory error
+Scaling from 2 machines
+Added node 869 to index 1
+Updated machine hashes: [443, 869, 936]
+Migrating data between 443 and 869 from source machine index 2 to dest machine index 1
+Attempting to insert new object 393 to machine index 0
+Memory error
+Scaling from 3 machines
+Added node 25 to index 0
+Updated machine hashes: [25, 443, 869, 936]
+Migrating data between 936 and 25 from source machine index 1 to dest machine index 0
+Attempting to insert new object 393 to machine index 1
+Memory error
+Scaling from 4 machines
+Added node 893 to index 3
+Updated machine hashes: [25, 443, 869, 893, 936]
+Migrating data between 869 and 893 from source machine index 4 to dest machine index 3
+Attempting to insert new object 393 to machine index 1
+Memory error
+Scaling from 5 machines
+Added node 675 to index 2
+Updated machine hashes: [25, 443, 675, 869, 893, 936]
+Migrating data between 443 and 675 from source machine index 3 to dest machine index 2
+Attempting to insert new object 393 to machine index 1
+Memory error
+Scaling from 6 machines
+Added node 653 to index 2
+Updated machine hashes: [25, 443, 653, 675, 869, 893, 936]
+Migrating data between 443 and 653 from source machine index 3 to dest machine index 2
+Attempting to insert new object 393 to machine index 1
+Memory error
+Scaling from 7 machines
+Added node 54 to index 1
+Updated machine hashes: [25, 54, 443, 653, 675, 869, 893, 936]
+Migrating data between 25 and 54 from source machine index 2 to dest machine index 1
+Attempting to insert new object 393 to machine index 2
+Memory error
+Scaling from 8 machines
+Added node 404 to index 2
+Updated machine hashes: [25, 54, 404, 443, 653, 675, 869, 893, 936]
+Migrating data between 54 and 404 from source machine index 3 to dest machine index 2
+Moving object 55 index 0 key first object
+Source machine:
+first object
+
+Attempting to insert new object 393 to machine index 2
+Memory error
+Scaling from 9 machines
+Added node 614 to index 4
+Updated machine hashes: [25, 54, 404, 443, 614, 653, 675, 869, 893, 936]
+Migrating data between 443 and 614 from source machine index 5 to dest machine index 4
+Attempting to insert new object 393 to machine index 2
+Memory error
+Scaling from 10 machines
+Added node 53 to index 1
+Updated machine hashes: [25, 53, 54, 404, 443, 614, 653, 675, 869, 893, 936]
+Migrating data between 25 and 53 from source machine index 2 to dest machine index 1
+Attempting to insert new object 393 to machine index 3
+Memory error
+Scaling from 11 machines
+Added node 450 to index 5
+Updated machine hashes: [25, 53, 54, 404, 443, 450, 614, 653, 675, 869, 893, 936]
+Migrating data between 443 and 450 from source machine index 6 to dest machine index 5
+Attempting to insert new object 393 to machine index 3
+Memory error
+Scaling from 12 machines
+Added node 940 to index 12
+Updated machine hashes: [25, 53, 54, 404, 443, 450, 614, 653, 675, 869, 893, 936, 940]
+Migrating data between 936 and 940 from source machine index 0 to dest machine index 12
+Attempting to insert new object 393 to machine index 3
+Memory error
+Scaling from 13 machines
+Added node 701 to index 9
+Updated machine hashes: [25, 53, 54, 404, 443, 450, 614, 653, 675, 701, 869, 893, 936, 940]
+Migrating data between 675 and 701 from source machine index 10 to dest machine index 9
+Attempting to insert new object 393 to machine index 3
+Memory error
+Scaling from 14 machines
+Added node 923 to index 12
+Updated machine hashes: [25, 53, 54, 404, 443, 450, 614, 653, 675, 701, 869, 893, 923, 936, 940]
+Migrating data between 893 and 923 from source machine index 13 to dest machine index 12
+Attempting to insert new object 393 to machine index 3
+Memory error
+Scaling from 15 machines
