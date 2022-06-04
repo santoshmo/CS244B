@@ -5,7 +5,7 @@ from utils import *
 from scenarios import *
 
 class PrimaryCacheServer: 
-	def __init__(self, scaling_strategy: str, maximum_capacity = 1000, num_machines=10, cache_size=100, replication_factor=2, hash_func=hash): 
+	def __init__(self, scaling_strategy: str, maximum_capacity = 1000, num_machines=10, cache_size=100, replication_factor=2, num_hashes_per_node=5, hash_func=hash): 
 		self.cache_size = cache_size
 		self.maximum_capacity = maximum_capacity
 		self.machine_memory_size = self.cache_size // num_machines
@@ -16,6 +16,7 @@ class PrimaryCacheServer:
 		self.object_hash_to_key = {}
 		self.replication_factor = replication_factor
 		self.hash_func = hash_func
+		self.num_machine_hashes_per_node = num_hashes_per_node
 		self.initMachines(scaling_strategy, num_machines)
 		
 	def initMachines(self, scaling_strategy: str, num_machines):
@@ -29,18 +30,29 @@ class PrimaryCacheServer:
 		cost += op_costs.add_node_cost()
 		
 		new_machine = WorkerCacheServer(scaling_strategy, self.machine_memory_size)
-		new_machine_hash, hash_cost = self.getHash(new_machine.id)
-		cost += hash_cost
 
-		new_machine_index = bisect_right(self.machine_hashes, new_machine_hash)
-		if new_machine_index > 0 and self.machine_hashes[new_machine_index - 1] == new_machine_hash:
-			raise Exception("collision occurred")
-		self.machine_hashes.insert(new_machine_index, new_machine_hash)
-		self.machines.insert(new_machine_index, new_machine)
-		print(f"Added node {new_machine_hash} to index {new_machine_index}")
-		print(f"Updated machine hashes: {self.machine_hashes}")
-		cost += self.migrate_data(new_machine_index)
+		counter = 0
+		success = False
+		while counter < self.num_machine_hashes_per_node:
+			try:
+				new_machine_hash, hash_cost = self.getHash(str(new_machine.id) + '_' + str(counter))
+				cost += hash_cost
 
+				new_machine_index = bisect_right(self.machine_hashes, new_machine_hash)
+				if new_machine_index > 0 and self.machine_hashes[new_machine_index - 1] == new_machine_hash:
+					raise Exception("collision occurred. Adding new machine hash {new_machine_hash} index {new_machine_index} to machine hashes {self.machine_hashes} failed")
+				self.machine_hashes.insert(new_machine_index, new_machine_hash)
+				self.machines.insert(new_machine_index, new_machine)
+				print(f"Added node {new_machine_hash} to index {new_machine_index}")
+				print(f"Updated machine hashes: {self.machine_hashes}")
+				cost += self.migrate_data(new_machine_index)
+				success = True
+			except Exception as e:
+				print(f"Exception: {e.__class__} {e}")
+				counter += 1
+
+		if not success:
+			raise Exception("Adding a new node failed")
 		return cost
 
 	def scaleCache(self, scaling_strategy: str): 
