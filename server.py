@@ -2,6 +2,9 @@ from bisect import bisect_right
 from collections import defaultdict
 import op_costs 
 from utils import *
+from scenarios import *
+
+MAX_ATTEMPTS = 3
 
 class PrimaryCacheServer: 
 	def __init__(self, scaling_strategy: str, maximum_capacity = 1000, num_machines=10, cache_size=100, replication_factor=2, hash_func=hash): 
@@ -14,7 +17,7 @@ class PrimaryCacheServer:
 		self.object_hashes = []
 		self.object_hash_to_key = {}
 		# Map from object name to set of machines responsible
-		self.object_hash_to_machine_hash = {}
+		self.object_key_to_machine_hash = {}
 		self.replication_factor = replication_factor
 		self.hash_func = hash_func
 		self.initMachines(scaling_strategy, num_machines)
@@ -79,14 +82,17 @@ class PrimaryCacheServer:
 			object_hash_to_migrate = self.object_hashes[object_index]
 			object_key_to_migrate = self.object_hash_to_key[object_hash_to_migrate]
 			print(f"Moving object {object_hash_to_migrate} index {object_index} key {object_key_to_migrate}")
-			print("Source machine:")
+			print("Getting from source machine")
 			object_to_migrate, op_cost = source_machine.get(object_key_to_migrate)
 			cost += op_cost 
 
 			# Redistribute hashes
-			self.object_hash_to_machines[object_hash_to_migrate].remove(self.getHash(source_machine.id))
-			self.object_hash_to_machines[object_hash_to_migrate].add(self.getHash(dest_machine.id))
+			if self.scaling_strategy == 'replication_factor':
+				print(f"Object key to machine hash: {self.object_key_to_machine_hash.keys()}")
+				self.object_key_to_machine_hash[object_key_to_migrate].remove(self.getHash(source_machine.id))
+				self.object_key_to_machine_hash[object_key_to_migrate].add(self.getHash(dest_machine.id))
 
+			print("Inserting to destination machine")
 			cost += dest_machine.insert(object_to_migrate)
 			source_machine.pop(object_key_to_migrate)
 			cost += op_costs.move_object_cost(object_to_migrate.size)
@@ -135,9 +141,10 @@ class PrimaryCacheServer:
 			if self.replication_factor == '': 
 				return ValueError('No replication factor provided')
 			# Generate replication factor (RF) number of hashes for the machines and objects
-			if object_hash_to_key not in self.object_hash_to_machine_hash:
-				self.object_hash_to_machine_hash[object_hash_to_key] = set()
-			used_hashes = self.object_hash_to_machine_hash[object_hash_to_key]
+			object_key = req.object.name
+			if object_key not in self.object_key_to_machine_hash:
+				self.object_key_to_machine_hash[object_key] = set()
+			used_hashes = self.object_key_to_machine_hash[object_key]
 			for i in range(self.replication_factor):
 				cost += self.insertObject(req, used_hashes)
 		else: 
@@ -148,12 +155,19 @@ class PrimaryCacheServer:
 	def Get(self, req: CacheGetRequest):
 		cost = 0
 		
-		machine_index, hash_cost = self.getMachineIndex(req.obj_name)
-		cost += hash_cost
+		counter = 0
+		while counter < MAX_ATTEMPTS:
+			try:
+				machine_index, hash_cost = self.getMachineIndex(req.obj_name + '_' + str(counter))
+				cost += hash_cost
 
-		print(f"Getting {req.obj_name} from machine index {machine_index}")
-		cachedObject, get_cost =  self.machines[machine_index].get(req.obj_name)
-		cost += get_cost
+				print(f"Getting {req.obj_name} from machine index {machine_index}")
+				cachedObject, get_cost =  self.machines[machine_index].get(req.obj_name)
+				cost += get_cost
+			except Exception as e: 
+				print(f"Getting {req.obj_name + '_' + str(counter)} from machine index {machine_index} failed")
+				counter += 1
+			break
 
 		return cachedObject, cost
 
@@ -202,3 +216,4 @@ class WorkerCacheServer:
 
 if __name__ == '__main__': 
 	pcs = PrimaryCacheServer('horizontal', 1000, 1, 1, 2)
+	print(BasicWriteAndRead(0, pcs))
