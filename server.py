@@ -65,6 +65,16 @@ class PrimaryCacheServer:
 		cost += await self.migrate_data(new_machine_index) # TODO: Decide what to do for replication
 		return cost
 
+	def remove_node(self, node_index=-1):
+		if node_index == -1:
+			node_index = random.randrange(0, len(self.machines))
+		if node_index >= len(self.machines):
+			raise Exception(f"Can't remove machine {node_index} from {len(self.machines)} machines.")
+		self.machine_hashes.pop(node_index)
+		self.machines.pop(node_index)
+		print(f"Removed node {node_index}")
+		print(f"Updated machine hashes: {self.machine_hashes}")
+
 	async def scaleCache(self, scaling_strategy: str): 
 		cost = 0 
 		if scaling_strategy == 'horizontal':
