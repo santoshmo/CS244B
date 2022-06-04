@@ -1,13 +1,10 @@
+import asyncio
 from server import CacheInsertRequest, CacheGetRequest, ObjectToCache
 
-def BasicWriteAndRead(scenario_cost, pcs): 
-	print("Adding first object")
-	insert_cost = pcs.Insert(CacheInsertRequest(ObjectToCache('first object', 1)))
-	scenario_cost += insert_cost
-
-	print("Adding second object")
-	insert_cost = pcs.Insert(CacheInsertRequest(ObjectToCache('second object', 1)))
-	scenario_cost += insert_cost
+async def BasicWriteAndRead(scenario_cost, pcs): 
+	print("Adding first and second object")
+	insert_cost = await asyncio.gather(pcs.Insert(CacheInsertRequest(ObjectToCache('first object', 1))), pcs.Insert(CacheInsertRequest(ObjectToCache('second object', 1))))
+	scenario_cost += sum(insert_cost)
 
 	print("Getting first object")
 	got_object, get_cost = pcs.Get(CacheGetRequest('first object'))

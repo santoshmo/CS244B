@@ -1,10 +1,15 @@
+import asyncio
 from bisect import bisect_right
 from datetime import datetime
+import random
+import re
 import uuid
 import pdb
 from collections import defaultdict
 import op_costs 
-from scenarios import * 
+from scenarios import *
+
+# REPLICATION_FACTOR = 3 # Not used.
 
 class ObjectToCache:
 	def __init__(self, name, size):
@@ -31,15 +36,18 @@ class PrimaryCacheServer:
 		self.machine_hashes = []
 		self.object_hashes = []
 		self.object_hash_to_key = {}
-		self.initMachines(0, scaling_strategy, num_machines)
+		self.init_machines_num = num_machines
 
-	def initMachines(self, cost: int, scaling_strategy: str, num_machines):
+	async def initMachines(self, cost: int = 0, scaling_strategy: str=None, num_machines=None):
+		if scaling_strategy is None:
+			scaling_strategy = self.scaling_strategy
+		if num_machines is None:
+			num_machines = self.init_machines_num
 		if self.cache_size % num_machines != 0: 
 			raise ValueError('cache_size %s does not evenly divide by requested number of machines %s', str(self.cache_size), str(num_machines))
-		for _ in range(num_machines):
-			self.add_node(scaling_strategy)
+		await asyncio.gather(*[self.add_node(scaling_strategy) for _ in range(num_machines)])
 
-	def add_node(self, scaling_strategy):
+	async def add_node(self, scaling_strategy):
 		cost = 0
 		cost += op_costs.add_node_cost()
 		
@@ -54,21 +62,21 @@ class PrimaryCacheServer:
 		self.machines.insert(new_machine_index, new_machine)
 		print(f"Added node {new_machine_hash} to index {new_machine_index}")
 		print(f"Updated machine hashes: {self.machine_hashes}")
-		cost += self.migrate_data(new_machine_index)
+		cost += await self.migrate_data(new_machine_index) # TODO: Decide what to do for replication
 		return cost
 
-	def scaleCache(self, scaling_strategy: str): 
+	async def scaleCache(self, scaling_strategy: str): 
 		cost = 0 
 		if scaling_strategy == 'horizontal':
 			# Add machine
 			# TODO(santoshm): Create a function out of this. Try to make it more general than just to horizontal scaling? 
-			if pcs.cache_size + pcs.machine_memory_size > pcs.maximum_capacity: 
+			if self.cache_size + self.machine_memory_size > self.maximum_capacity: 
 				raise MemoryError('Cache cannot scale any further. Please allocate more capacity.')
-			cost = self.add_node(scaling_strategy)
+			cost = await self.add_node(scaling_strategy)
 			self.cache_size += self.machine_memory_size
 			return cost
 
-	def migrate_data(self, dest_machine_index):
+	async def migrate_data(self, dest_machine_index):
 		cost = 0
 		left_machine_index = (dest_machine_index - 1) % len(self.machines)
 		source_machine_index = (dest_machine_index + 1) % len(self.machines)
@@ -80,13 +88,13 @@ class PrimaryCacheServer:
 		dest_machine = self.machines[dest_machine_index]
 		print(f"Migrating data between {left_machine_hash} and {dest_machine_hash} from source machine index {source_machine_index} to dest machine index {dest_machine_index}")
 		if(left_machine_hash > dest_machine_hash):
-			cost += self.move_objects(object_index_start, len(self.object_hashes), dest_machine, source_machine)
-			cost += self.move_objects(0, object_index_end, dest_machine, source_machine)
+			cost += await self.move_objects(object_index_start, len(self.object_hashes), dest_machine, source_machine)
+			cost += await self.move_objects(0, object_index_end, dest_machine, source_machine)
 		else:
-			cost += self.move_objects(object_index_start, object_index_end, dest_machine, source_machine)
+			cost += await self.move_objects(object_index_start, object_index_end, dest_machine, source_machine)
 		return cost
 
-	def move_objects(self, object_index_start, object_index_end, dest_machine, source_machine):
+	async def move_objects(self, object_index_start, object_index_end, dest_machine, source_machine):
 		cost = 0
 		for object_index in range(object_index_start, object_index_end):
 			object_hash_to_migrate = self.object_hashes[object_index]
@@ -96,10 +104,38 @@ class PrimaryCacheServer:
 			object_to_migrate, op_cost = source_machine.get(object_key_to_migrate)
 			cost += op_cost 
 
-			cost += dest_machine.insert(object_to_migrate)
+			cost += await dest_machine.insert(object_to_migrate)
 			source_machine.pop(object_key_to_migrate)
 			cost += op_costs.move_object_cost(object_to_migrate.size)
-		return cost 
+		return cost
+
+	# Not used. Decide what to do for replication during node addition
+	async def replicate_data(self, dest_machine_index):
+		cost = 0
+		source_machine_index = (dest_machine_index - 1) % len(self.machines)
+		source_machine = self.machines[source_machine_index]
+		dest_machine = self.machines[dest_machine_index]
+		for object_index in range(0, len(self.object_hashes)):
+			object_hash_to_migrate = self.object_hashes[object_index]
+			object_key_to_migrate = self.object_hash_to_key[object_hash_to_migrate]
+			print(f"Moving object {object_hash_to_migrate} index {object_index} key {object_key_to_migrate}")
+			print("Source machine:")
+			object_to_migrate, op_cost = source_machine.get(object_key_to_migrate)
+			cost += op_cost 
+
+			cost += await dest_machine.insert(object_to_migrate)
+			cost += op_costs.move_object_cost(object_to_migrate.size)
+		return cost
+	
+	# Not used. Decide what to do for replication during insertion
+	async def replicate_datum(self, object_to_migrate, source_machine_index, replication_factor):
+		cost = 0
+		dest_machine_index = (source_machine_index + 1) % len(self.machines)
+		dest_machine = self.machines[dest_machine_index]
+		cost += await asyncio.gather(*[dest_machine.insert(object_to_migrate) for _ in range(0, replication_factor)
+])
+		cost += op_costs.move_object_cost(object_to_migrate.size) * replication_factor # TODO: Is this right?
+		return cost
 
 	def getHash(self, input):
 		return hash(input) % self.maximum_capacity, op_costs.compute_hash_cost()
@@ -111,7 +147,7 @@ class PrimaryCacheServer:
 		object_hash, hash_cost = self.getHash(obj_name)
 		return (bisect_right(self.machine_hashes, object_hash)) % len(self.machines), hash_cost
 
-	def Insert(self, req: CacheInsertRequest):
+	async def Insert(self, req: CacheInsertRequest):
 		cost = 0 
 
 		new_object_hash, hash_cost = self.getHash(req.object.name)
@@ -120,16 +156,17 @@ class PrimaryCacheServer:
 		machine_index = (bisect_right(self.machine_hashes, new_object_hash)) % len(self.machines)
 		print(f"Attempting to insert new object {new_object_hash} to machine index {machine_index}")
 		try: 
-			cost += self.machines[machine_index].insert(req.object)
+			cost += await self.machines[machine_index].insert(req.object)
 			self.object_hash_to_key[new_object_hash] = req.object.name
 			object_index = bisect_right(self.object_hashes, new_object_hash)
 			self.object_hashes.insert(object_index, new_object_hash)
 			print(f"Added new object {new_object_hash} to index {object_index}")
 			print(f"Updated object hashes: {self.object_hashes}")
+			# self.replicate_datum(req.object, machine_index, REPLICATION_FACTOR) # TODO: What do we do for replication?
 		except MemoryError as e: 
 			print(f"Scaling from {len(self.machines)} machines")
-			cost += self.scaleCache(self.scaling_strategy)
-			cost += self.Insert(req)
+			cost += await self.scaleCache(self.scaling_strategy)
+			cost += await self.Insert(req)
 
 		return cost 
 
@@ -153,7 +190,7 @@ class WorkerCacheServer:
 		self.objects = {}
 		self.hitCounter = defaultdict(int)
 
-	def insert(self, obj: ObjectToCache): 
+	async def insert(self, obj: ObjectToCache): 
 		cost = 0
 		if self.memory - obj.size < 0: 
 			if self.scaling_strategy == 'horizontal': # TODO(santoshm): Make this an Enum
@@ -184,6 +221,11 @@ class WorkerCacheServer:
 	def dump(self):
 		print(", ".join(self.objects.keys()))
 
-if __name__ == '__main__': 
+async def main():
 	pcs = PrimaryCacheServer('horizontal', 1000, 1, 1)
-	print(BasicWriteAndRead(0, pcs))
+	await pcs.initMachines()
+	scenario_cost = await BasicWriteAndRead(0, pcs)
+	print(scenario_cost)
+
+if __name__ == '__main__':
+	asyncio.run(main())
