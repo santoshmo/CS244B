@@ -4,8 +4,6 @@ import op_costs
 from utils import *
 from scenarios import *
 
-MAX_ATTEMPTS = 3
-
 class PrimaryCacheServer: 
 	def __init__(self, scaling_strategy: str, maximum_capacity = 1000, num_machines=10, cache_size=100, replication_factor=2, hash_func=hash): 
 		self.cache_size = cache_size
@@ -16,8 +14,6 @@ class PrimaryCacheServer:
 		self.machine_hashes = []
 		self.object_hashes = []
 		self.object_hash_to_key = {}
-		# Map from object name to set of machines responsible
-		self.object_key_to_machine_hash = {}
 		self.replication_factor = replication_factor
 		self.hash_func = hash_func
 		self.initMachines(scaling_strategy, num_machines)
@@ -49,14 +45,13 @@ class PrimaryCacheServer:
 
 	def scaleCache(self, scaling_strategy: str): 
 		cost = 0 
-		if scaling_strategy == 'horizontal':
-			# Add machine
-			# TODO(santoshm): Create a function out of this. Try to make it more general than just to horizontal scaling? 
-			if self.cache_size + self.machine_memory_size > self.maximum_capacity: 
-				raise MemoryError('Cache cannot scale any further. Please allocate more capacity.')
-			cost = self.add_node(scaling_strategy)
-			self.cache_size += self.machine_memory_size
-			return cost
+		# Add machine
+		# TODO(santoshm): Create a function out of this. Try to make it more general than just to horizontal scaling? 
+		if self.cache_size + self.machine_memory_size > self.maximum_capacity: 
+			raise MemoryError('Cache cannot scale any further. Please allocate more capacity.')
+		cost = self.add_node(scaling_strategy)
+		self.cache_size += self.machine_memory_size
+		return cost
 
 	def migrate_data(self, dest_machine_index):
 		cost = 0
@@ -86,12 +81,6 @@ class PrimaryCacheServer:
 			object_to_migrate, op_cost = source_machine.get(object_key_to_migrate)
 			cost += op_cost 
 
-			# Redistribute hashes
-			if self.scaling_strategy == 'replication_factor':
-				print(f"Object key to machine hash: {self.object_key_to_machine_hash.keys()}")
-				self.object_key_to_machine_hash[object_key_to_migrate].remove(self.getHash(source_machine.id))
-				self.object_key_to_machine_hash[object_key_to_migrate].add(self.getHash(dest_machine.id))
-
 			print("Inserting to destination machine")
 			cost += dest_machine.insert(object_to_migrate)
 			source_machine.pop(object_key_to_migrate)
@@ -108,17 +97,12 @@ class PrimaryCacheServer:
 		return (bisect_right(self.machine_hashes, object_hash)) % len(self.machines), hash_cost
 
 
-	def insertObject(self, req: CacheInsertRequest, used_hashes=set()): 
+	def insertObject(self, req: CacheInsertRequest, counter=0): 
 		cost = 0
-		new_object_hash = None
-		counter = 0
-		while new_object_hash not in used_hashes:
-			new_object_hash, hash_cost = self.getHash(req.object.name + '_' + str(counter))
-			cost += hash_cost
-			used_hashes.add(new_object_hash)
-			counter += 1
-
+		new_object_hash, hash_cost = self.getHash(req.object.name + '_' + str(counter))
+		cost += hash_cost
 		machine_index = (bisect_right(self.machine_hashes, new_object_hash)) % len(self.machines)
+
 		print(f"Attempting to insert new object {new_object_hash} to machine index {machine_index}")
 		try: 
 			cost += self.machines[machine_index].insert(req.object)
@@ -130,7 +114,7 @@ class PrimaryCacheServer:
 		except MemoryError as e: 
 			print(f"Scaling from {len(self.machines)} machines")
 			cost += self.scaleCache(self.scaling_strategy)
-			cost += self.Insert(req)
+			cost += self.insertObject(req, counter)
 
 		return cost
 
@@ -141,12 +125,8 @@ class PrimaryCacheServer:
 			if self.replication_factor == '': 
 				return ValueError('No replication factor provided')
 			# Generate replication factor (RF) number of hashes for the machines and objects
-			object_key = req.object.name
-			if object_key not in self.object_key_to_machine_hash:
-				self.object_key_to_machine_hash[object_key] = set()
-			used_hashes = self.object_key_to_machine_hash[object_key]
 			for i in range(self.replication_factor):
-				cost += self.insertObject(req, used_hashes)
+				cost += self.insertObject(req, i)
 		else: 
 			cost += self.insertObject(req)
 
@@ -156,20 +136,20 @@ class PrimaryCacheServer:
 		cost = 0
 		
 		counter = 0
-		while counter < MAX_ATTEMPTS:
+		while counter < self.replication_factor:
 			try:
 				machine_index, hash_cost = self.getMachineIndex(req.obj_name + '_' + str(counter))
 				cost += hash_cost
 
 				print(f"Getting {req.obj_name} from machine index {machine_index}")
-				cachedObject, get_cost =  self.machines[machine_index].get(req.obj_name)
+				cachedObject, get_cost = self.machines[machine_index].get(req.obj_name)
 				cost += get_cost
-			except Exception as e: 
+				return cachedObject, cost
+			except Exception as e:
+				print(f"Exception: {e.__class__} {e}")
 				print(f"Getting {req.obj_name + '_' + str(counter)} from machine index {machine_index} failed")
 				counter += 1
-			break
-
-		return cachedObject, cost
+		raise Exception(f"Getting {req.obj_name} used up max attempts of {self.replication_factor}")
 
 class WorkerCacheServer: 
 	def __init__(self, scaling_strategy='horizontal', memory=100, load_threshold=5):
@@ -184,16 +164,15 @@ class WorkerCacheServer:
 	def insert(self, obj: ObjectToCache): 
 		cost = 0
 
-		if self.scaling_strategy == 'horizontal': 
-			if self.memory - obj.size < 0: 
-				print("Memory error")
-				raise MemoryError('Machine not large enough')
+		if self.memory - obj.size < 0: 
+			print("Memory error")
+			raise MemoryError('Machine not large enough')
 
-			else: 
-				cost += op_costs.write_cost()
-				self.memory -= obj.size
-				obj_name = obj.name
-				self.objects[obj_name] = obj
+		else: 
+			cost += op_costs.write_cost()
+			self.memory -= obj.size
+			obj_name = obj.name
+			self.objects[obj_name] = obj
 
 		return cost 
 
@@ -215,5 +194,5 @@ class WorkerCacheServer:
 		print(", ".join(self.objects.keys()))
 
 if __name__ == '__main__': 
-	pcs = PrimaryCacheServer('horizontal', 1000, 1, 1, 2)
+	pcs = PrimaryCacheServer('replication_factor', 1000, 1, 1, 2)
 	print(BasicWriteAndRead(0, pcs))
