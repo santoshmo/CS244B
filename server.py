@@ -1,6 +1,7 @@
 import asyncio
 from bisect import bisect_right
 from collections import defaultdict
+import hashlib
 import op_costs 
 from utils import *
 from scenarios import *
@@ -30,6 +31,7 @@ class PrimaryCacheServer:
 		if self.cache_size % num_machines != 0: 
 			raise ValueError('cache_size %s does not evenly divide by requested number of machines %s', str(self.cache_size), str(num_machines))
 		await asyncio.gather(*[self.add_node(scaling_strategy) for _ in range(num_machines)])
+		print("Done init machines")
 
 	async def add_node(self, scaling_strategy):
 		cost = 0
@@ -46,7 +48,7 @@ class PrimaryCacheServer:
 
 				new_machine_index = bisect_right(self.machine_hashes, new_machine_hash)
 				if new_machine_index > 0 and self.machine_hashes[new_machine_index - 1] == new_machine_hash:
-					raise Exception("collision occurred. Adding new machine hash {new_machine_hash} index {new_machine_index} to machine hashes {self.machine_hashes} failed")
+					raise Exception(f"collision occurred. Adding new machine hash {new_machine_hash} index {new_machine_index} to machine hashes {self.machine_hashes} failed")
 				self.machine_hashes.insert(new_machine_index, new_machine_hash)
 				self.machines.insert(new_machine_index, new_machine)
 				print(f"Added node {new_machine_hash} to index {new_machine_index}")
@@ -55,10 +57,11 @@ class PrimaryCacheServer:
 				success = True
 			except Exception as e:
 				print(f"Exception: {e.__class__} {e}")
-				counter += 1
+			counter += 1
 
 		if not success:
 			raise Exception("Adding a new node failed")
+		print(f"Done adding machine {new_machine.id}")
 		return cost
 
 	def remove_node(self, node_index=-1):
@@ -249,7 +252,7 @@ class WorkerCacheServer:
 		print(", ".join(self.objects.keys()))
 
 async def main():
-	pcs = PrimaryCacheServer('replication_factor', 1000, 1, 1, 2)
+	pcs = PrimaryCacheServer('replication_factor', 10000, 5, 10, 2, 2)
 	await pcs.initMachines()
 	scenario_cost = await BasicWriteAndRead(0, pcs)
 	print(scenario_cost)
