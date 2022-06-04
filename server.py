@@ -6,6 +6,9 @@ from utils import *
 from scenarios import *
 import random
 import uuid
+from statistics import mean
+import hashlib
+import pdb
 
 class PrimaryCacheServer: 
 	def __init__(self, scaling_strategy: str, maximum_capacity = 1000, num_machines=10, cache_size=100, replication_factor=2, num_hashes_per_node=5, hash_func=hash): 
@@ -143,7 +146,11 @@ class PrimaryCacheServer:
 		return cost
 
 	def getHash(self, obj):
-		return self.hash_func(obj) % self.maximum_capacity, op_costs.compute_hash_cost()
+		if self.hash_func == hash: 
+			return self.hash_func(obj) % self.maximum_capacity, op_costs.compute_hash_cost()
+		if self.hash_func == hashlib.sha256: 
+			int_hash = int.from_bytes(self.hash_func(obj.encode('utf-8')).digest(), 'big')
+			return int_hash % self.maximum_capacity, op_costs.compute_hash_cost()
 
 	# Consistent Hashing used to find the relevant machine for the requested object. This will get the first
 	# valid machine.
@@ -241,7 +248,6 @@ class WorkerCacheServer:
 		return self.objects[obj_name], cost 
 
 	def pop(self, obj_name):
-		#TODO: Do we need to add a cost to remove an object, or is that negligible? 
 		del self.objects[obj_name]
 		self.dump()
 
@@ -249,10 +255,17 @@ class WorkerCacheServer:
 		print(", ".join(self.objects.keys()))
 
 async def main():
-	pcs = PrimaryCacheServer('replication_factor', 1000, 1, 1, 2)
-	await pcs.initMachines()
-	scenario_cost = await BasicWriteAndRead(0, pcs)
-	print(scenario_cost)
+	errors = 0
+	scenario_costs = []
+	for _ in range(1):
+		pcs = PrimaryCacheServer('replication_factor', 1000, 5, 10, 2, hash_func=hashlib.sha256)
+		await pcs.initMachines()
+		try: 
+			scenario_costs.append(await BasicWriteAndRead(0, pcs))
+		except Exception as e:
+			errors += 1
+	print(mean(scenario_costs))
+	print(errors)
 
 if __name__ == '__main__':
 	asyncio.run(main())
