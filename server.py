@@ -158,13 +158,14 @@ class PrimaryCacheServer:
 		return cachedObject, cost
 
 class WorkerCacheServer: 
-	def __init__(self, scaling_strategy='horizontal', memory=100, load_threshold=2):
+	def __init__(self, scaling_strategy='horizontal', memory=100, load_threshold=5):
 		self.id = uuid.uuid4()
 		self.memory = memory 
 		self.scaling_strategy = scaling_strategy
 		self.objects = {}
 		self.hitCounter = defaultdict(int)
 		self.num_requests_processing = 0
+		sef.load_threshold = load_threshold
 
 	def insert(self, obj: ObjectToCache): 
 		cost = 0
