@@ -165,7 +165,7 @@ class WorkerCacheServer:
 		self.objects = {}
 		self.hitCounter = defaultdict(int)
 		self.num_requests_processing = 0
-		sef.load_threshold = load_threshold
+		self.load_threshold = load_threshold
 
 	def insert(self, obj: ObjectToCache): 
 		cost = 0
