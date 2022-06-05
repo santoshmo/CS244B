@@ -2,6 +2,8 @@ import asyncio
 from bisect import bisect_right
 from collections import defaultdict
 import hashlib
+from statistics import mean
+import sys
 import op_costs 
 from utils import *
 from scenarios import *
@@ -58,7 +60,7 @@ class PrimaryCacheServer:
 					raise Exception(f"collision occurred. Adding new machine hash {new_machine_hash} index {new_machine_index} to machine hashes {self.machine_hashes} failed")
 				self.machine_hashes.insert(new_machine_index, new_machine_hash)
 				self.machines.insert(new_machine_index, new_machine)
-				self.machine_id_to_indices[new_machine.id].append(new_machine_index)
+				self.machine_id_to_indices[new_machine.id].append((new_machine, new_machine_hash))
 				debug(f"Added node {new_machine_hash} to index {new_machine_index}")
 				debug(f"Updated machine hashes: {self.machine_hashes}")
 				cost += await self.migrate_data(new_machine_index)
@@ -78,10 +80,10 @@ class PrimaryCacheServer:
 		if node_index >= len(self.machines):
 			raise Exception(f"Can't remove machine {node_index} from {len(self.machines)} machines.")
 		machine_id = self.machines[node_index].id
-		for node_index in self.machine_id_to_indices[machine_id]:
-			self.machine_hashes.pop(node_index)
-			self.machines.pop(node_index)
-			debug(f"Removed node {node_index}")
+		for machine, machine_hash in self.machine_id_to_indices[machine_id]:
+			self.machine_hashes.remove(machine_hash)
+			self.machines.remove(machine)
+			debug(f"Removed node hash {machine_hash}")
 		debug(f"Updated machine hashes: {self.machine_hashes}")
 
 	async def scaleCache(self, scaling_strategy: str): 
@@ -158,7 +160,9 @@ class PrimaryCacheServer:
 		return cost
 
 	def getHash(self, obj):
-		return self.hash_func(obj) % self.maximum_capacity, op_costs.compute_hash_cost()
+		hash = hashlib.sha256()
+		hash.update(bytes(obj.encode('utf-8')))
+		return int(hash.hexdigest(), 16) % self.maximum_capacity, op_costs.compute_hash_cost()
 
 	# Consistent Hashing used to find the relevant machine for the requested object. This will get the first
 	# valid machine.
@@ -267,13 +271,25 @@ class WorkerCacheServer:
 		debug(", ".join(self.objects.keys()))
 
 async def main():
-	pcs = PrimaryCacheServer('replication_factor', 10000, 5, 10, 2, 2)
-	await pcs.initMachines()
-	scenario_cost = await BasicWriteAndRead(0, pcs)
-	print(f"basic write and read: {scenario_cost}")
+	num_runs = 3
+	num_writes = 50
+	costs = []
+	num_machines = []
+	num_errors = []
+	print("cost,num machines,num errors")
+	for replication_factor in range(1, 10):
+		for _ in range(num_runs):
+			num_error = 0
+			pcs = PrimaryCacheServer('replication_factor', sys.maxsize, 20, 1000, replication_factor, 2)
+			await pcs.initMachines()
+			scenario_cost, num_error = await BasicWriteAndReadWithNodeFailures(0, pcs, num_writes)
+			costs.append(scenario_cost)
+			num_machines.append(len(set(pcs.machines)))
+			num_errors.append(num_error)
+		print(f"{mean(costs)},{mean(num_machines)},{mean(num_errors)}")
 
-	scenario_cost = await BasicWriteAndReadWithNodeFailures(0, pcs)
-	print(f"basic write and read with node failures: {scenario_cost}")
+	# scenario_cost = await BasicWriteAndReadWithNodeFailures(0, pcs)
+	# print(f"basic write and read with node failures: {scenario_cost}")
 
 if __name__ == '__main__':
 	asyncio.run(main())

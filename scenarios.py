@@ -9,22 +9,19 @@ def debug(str):
 def get_object_keys(prefix, count):
 	return [f"{prefix}_{i}" for i in range(count)]
 
-async def BasicWriteAndRead(scenario_cost, pcs): 
-	debug("Adding first and second object")
-	insert_cost = await asyncio.gather(pcs.Insert(CacheInsertRequest(ObjectToCache('first object', 1))), pcs.Insert(CacheInsertRequest(ObjectToCache('second object', 1))))
+async def BasicWriteAndRead(scenario_cost, pcs, num_writes=2): 
+	debug("Adding objects")
+	object_keys = get_object_keys("basic", num_writes)
+	insert_cost = await asyncio.gather(*[pcs.Insert(CacheInsertRequest(ObjectToCache(object_key, 1))) for object_key in object_keys])
 	scenario_cost += sum(insert_cost)
 
-	debug("Getting first object")
-	got_object, get_cost = pcs.Get(CacheGetRequest('first object'))
-	scenario_cost += get_cost
-	assert(got_object.name, 'first object')
+	debug("Getting objects")
+	for object_key in object_keys:
+		got_object, get_cost = pcs.Get(CacheGetRequest(object_key))
+		scenario_cost += get_cost
+		assert(got_object.name, object_key)
 	
-	debug("Getting second object")
-	got_object_2, get_cost = pcs.Get(CacheGetRequest('second object'))
-	scenario_cost += get_cost
-	assert(got_object_2.name, 'second object')
-	
-	return scenario_cost
+	return scenario_cost, 0
 
 async def BasicWriteAndReadWithNodeFailures(scenario_cost, pcs, num_writes=2, num_failures=1): 
 	debug("Adding objects")
@@ -42,9 +39,13 @@ async def BasicWriteAndReadWithNodeFailures(scenario_cost, pcs, num_writes=2, nu
 		pcs.remove_node()
 
 	debug("Getting objects")
+	num_errors = 0
 	for object_key in object_keys:
-		got_object, get_cost = pcs.Get(CacheGetRequest(object_key))
-		scenario_cost += get_cost
-		assert(got_object.name, object_key)
+		try:
+			got_object, get_cost = pcs.Get(CacheGetRequest(object_key))
+			scenario_cost += get_cost
+			assert(got_object.name, object_key)
+		except Exception:
+			num_errors += 1
 	
-	return scenario_cost
+	return scenario_cost, num_errors
