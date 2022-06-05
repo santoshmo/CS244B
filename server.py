@@ -195,10 +195,10 @@ class PrimaryCacheServer:
 				debug(f"Scaling from {len(self.machines)} machines")
 				cost += await self.scaleCache(self.scaling_strategy)
 				if attempt_count == NUM_RETRIES-1: 
-					return e
+					raise e
 			except RuntimeError as e:	
 				if attempt_count == NUM_RETRIES-1: 
-					return e
+					raise RuntimeError(f"{e} {attempt_count}")
 		return cost
 
 	async def Insert(self, req: CacheInsertRequest):
@@ -248,7 +248,7 @@ class WorkerCacheServer:
 	async def insert(self, obj: ObjectToCache):
 
 		if self.current_load + op_costs.WRITE_LOAD > self.load_threshold: 
-			return RuntimeError('Server busy')
+			raise RuntimeError('Server busy')
 
 		self.current_load += op_costs.WRITE_LOAD
 
@@ -271,7 +271,7 @@ class WorkerCacheServer:
 		cost = 0
 
 		if self.current_load + op_costs.READ_LOAD > self.load_threshold: 
-			return RuntimeError('Server busy')
+			raise RuntimeError('Server busy')
 
 		self.current_load += op_costs.READ_LOAD
 
@@ -293,7 +293,7 @@ class WorkerCacheServer:
 
 async def main():
 	num_runs = 3
-	num_writes = 50
+	num_writes = 500
 	costs = []
 	num_machines = []
 	num_errors = []
