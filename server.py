@@ -216,7 +216,7 @@ class PrimaryCacheServer:
 
 		return cost 
 
-	def Get(self, req: CacheGetRequest):
+	async def Get(self, req: CacheGetRequest):
 		cost = 0
 		counter = 0
 		while counter < self.replication_factor:

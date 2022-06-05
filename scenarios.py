@@ -17,7 +17,7 @@ async def BasicWriteAndRead(scenario_cost, pcs, num_writes=2):
 
 	debug("Getting objects")
 	for object_key in object_keys:
-		got_object, get_cost = pcs.Get(CacheGetRequest(object_key))
+		got_object, get_cost = await pcs.Get(CacheGetRequest(object_key))
 		scenario_cost += get_cost
 		assert(got_object.name, object_key)
 	
@@ -31,7 +31,7 @@ async def BasicWriteAndReadWithNodeFailures(scenario_cost, pcs, num_writes=2, nu
 
 	debug("Getting objects")
 	for object_key in object_keys:
-		got_object, get_cost = pcs.Get(CacheGetRequest(object_key))
+		got_object, get_cost = await pcs.Get(CacheGetRequest(object_key))
 		scenario_cost += get_cost
 		assert(got_object.name, object_key)
 
@@ -42,7 +42,7 @@ async def BasicWriteAndReadWithNodeFailures(scenario_cost, pcs, num_writes=2, nu
 	num_errors = 0
 	for object_key in object_keys:
 		try:
-			got_object, get_cost = pcs.Get(CacheGetRequest(object_key))
+			got_object, get_cost = await pcs.Get(CacheGetRequest(object_key))
 			scenario_cost += get_cost
 			assert(got_object.name, object_key)
 		except Exception:
