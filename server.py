@@ -195,8 +195,10 @@ class PrimaryCacheServer:
 				debug(f"Scaling from {len(self.machines)} machines")
 				cost += await self.scaleCache(self.scaling_strategy)
 				if attempt_count == NUM_RETRIES-1: 
-					return e		
-
+					return e
+			except RuntimeError as e:	
+				if attempt_count == NUM_RETRIES-1: 
+					return e
 		return cost
 
 	async def Insert(self, req: CacheInsertRequest):
