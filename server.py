@@ -12,6 +12,8 @@ import uuid
 
 IS_DEBUG = False
 
+NUM_RETRIES = 3
+
 def debug(str):
 	if IS_DEBUG:
 		print(str)
@@ -177,20 +179,23 @@ class PrimaryCacheServer:
 		machine_index = (bisect_right(self.machine_hashes, new_object_hash)) % len(self.machines)
 
 		debug(f"Attempting to insert new object {new_object_hash} to machine index {machine_index}")
-		try: 
-			insertion_cost, is_new_key = await self.machines[machine_index].insert(req.object)
-			cost += insertion_cost
-			if is_new_key:
-				self.object_hash_to_key[new_object_hash] = req.object.name
-				object_index = bisect_right(self.object_hashes, new_object_hash)
-				self.object_hashes.insert(object_index, new_object_hash)
-				debug(f"Added new object {new_object_hash} to index {object_index}")
-				debug(f"Updated object hashes: {self.object_hashes}")
-			# self.replicate_datum(req.object, machine_index, REPLICATION_FACTOR) # TODO: What do we do for replication?
-		except MemoryError as e: 
-			debug(f"Scaling from {len(self.machines)} machines")
-			cost += await self.scaleCache(self.scaling_strategy)
-			cost += await self.insertObject(req, counter)
+		for attempt_count in range(NUM_RETRIES):
+			try: 
+				insertion_cost, is_new_key = await self.machines[machine_index].insert(req.object)
+				cost += insertion_cost
+				if is_new_key:
+					self.object_hash_to_key[new_object_hash] = req.object.name
+					object_index = bisect_right(self.object_hashes, new_object_hash)
+					self.object_hashes.insert(object_index, new_object_hash)
+					debug(f"Added new object {new_object_hash} to index {object_index}")
+					debug(f"Updated object hashes: {self.object_hashes}")
+				# self.replicate_datum(req.object, machine_index, REPLICATION_FACTOR) # TODO: What do we do for replication?
+				return cost
+			except MemoryError as e: 
+				debug(f"Scaling from {len(self.machines)} machines")
+				cost += await self.scaleCache(self.scaling_strategy)
+				if attempt_count == NUM_RETRIES-1: 
+					return e		
 
 		return cost
 
@@ -228,7 +233,7 @@ class PrimaryCacheServer:
 		raise Exception(f"Getting {req.obj_name} used up max attempts of {self.replication_factor}")
 
 class WorkerCacheServer: 
-	def __init__(self, scaling_strategy='horizontal', memory=100, load_threshold=5):
+	def __init__(self, scaling_strategy='horizontal', memory=100, load_threshold=2):
 		self.id = uuid.uuid4()
 		self.memory = memory 
 		self.scaling_strategy = scaling_strategy
@@ -236,8 +241,15 @@ class WorkerCacheServer:
 		self.hitCounter = defaultdict(int)
 		self.num_requests_processing = 0
 		self.load_threshold = load_threshold
+		self.current_load = 0
 
 	async def insert(self, obj: ObjectToCache):
+
+		if self.current_load + op_costs.WRITE_LOAD > self.load_threshold: 
+			return RuntimeError('Server busy')
+
+		self.current_load += op_costs.WRITE_LOAD
+
 		is_new_key = obj.name not in self.objects
 		if is_new_key:
 			if self.memory - obj.size < 0: 
@@ -250,14 +262,21 @@ class WorkerCacheServer:
 		self.objects[obj_name] = obj
 		self.dump()
 
+		self.current_load -= op_costs.WRITE_LOAD
 		return op_costs.write_cost(), is_new_key
 
 	def get(self, obj_name): 
 		cost = 0
 
+		if self.current_load + op_costs.READ_LOAD > self.load_threshold: 
+			return RuntimeError('Server busy')
+
+		self.current_load += op_costs.READ_LOAD
+
 		self.hitCounter[obj_name] += 1
 		cost += op_costs.read_cost()
 
+		self.current_load -= op_costs.READ_LOAD
 		self.dump()
 		return self.objects[obj_name], cost 
 
@@ -276,17 +295,17 @@ async def main():
 	costs = []
 	num_machines = []
 	num_errors = []
-	print("cost,num machines,num errors")
+	print("cost,num machines,replication_factor, num errors")
 	for replication_factor in range(1, 10):
 		for _ in range(num_runs):
 			num_error = 0
-			pcs = PrimaryCacheServer('replication_factor', sys.maxsize, 20, 1000, replication_factor, 2)
+			pcs = PrimaryCacheServer('replication_factor', sys.maxsize, 20, 1000, replication_factor)
 			await pcs.initMachines()
 			scenario_cost, num_error = await BasicWriteAndReadWithNodeFailures(0, pcs, num_writes)
 			costs.append(scenario_cost)
 			num_machines.append(len(set(pcs.machines)))
 			num_errors.append(num_error)
-		print(f"{mean(costs)},{mean(num_machines)},{mean(num_errors)}")
+		print(f"{mean(costs)},{mean(num_machines)}, {replication_factor}, {mean(num_errors)}")
 
 	# scenario_cost = await BasicWriteAndReadWithNodeFailures(0, pcs)
 	# print(f"basic write and read with node failures: {scenario_cost}")

@@ -1,3 +1,6 @@
+READ_LOAD = 1
+WRITE_LOAD = 2
+
 def write_cost(): 
 	return 50
 
