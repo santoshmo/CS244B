@@ -8,8 +8,9 @@ class ObjectToCache:
 		self.id = uuid.uuid4()
 
 class CacheInsertRequest: 
-	def __init__(self, obj: ObjectToCache): 
+	def __init__(self, obj: ObjectToCache, background: bool=False): 
 		self.object = obj
+		self.background = background
 		self.timestamp = datetime.now()
 
 class CacheGetRequest:
